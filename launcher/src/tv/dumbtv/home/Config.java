@@ -58,6 +58,22 @@ final class Config {
 
     static final Choice THEME = new Choice("theme", "Theme", Theme.ORIGINAL.key,
             Theme.keys(), Theme.names());
+    /**
+     * Animations › master switch, off by default: the stick is slow and a still screen is the
+     * fastest. Each effect below also has its own switch, read through {@link #anim(Choice)}.
+     */
+    static final Choice ANIM = new Choice("anim", "Animations", "off",
+            new String[] {"off", "on"},
+            new String[] {"Off", "On"});
+    static final Choice ANIM_FOCUS = new Choice("anim.focus", "Focus zoom", "on",
+            new String[] {"on", "off"},
+            new String[] {"On", "Off"});
+    static final Choice ANIM_FADES = new Choice("anim.fades", "Fades", "on",
+            new String[] {"on", "off"},
+            new String[] {"On", "Off"});
+    static final Choice ANIM_RETRO = new Choice("anim.retro", "Retro effects", "on",
+            new String[] {"on", "off"},
+            new String[] {"On", "Off"});
     static final Choice ACCENT = new Choice("accent", "Accent color", "blue",
             new String[] {"white", "blue", "cyan", "green", "amber", "red", "pink", "violet"},
             new String[] {"White", "Blue", "Cyan", "Green", "Amber", "Red", "Pink", "Violet"});
@@ -105,7 +121,7 @@ final class Config {
             new String[] {"off", "on"},
             new String[] {"Off", "On"});
 
-    static final Choice[] CHOICES = {THEME, ACCENT, TILES, LAYOUT, ORDER, LABELS, CLOCK, MEMORY, INPUTS, SWITCH, BACKGROUND, DIM, ROTATE, LOCK};
+    static final Choice[] CHOICES = {THEME, ANIM, ANIM_FOCUS, ANIM_FADES, ANIM_RETRO, ACCENT, TILES, LAYOUT, ORDER, LABELS, CLOCK, MEMORY, INPUTS, SWITCH, BACKGROUND, DIM, ROTATE, LOCK};
 
     /** Folder of wallpapers, next to home.conf, that Background › Image file rotates through. */
     static final String WALLPAPERS = "wallpapers";
@@ -294,6 +310,11 @@ final class Config {
             }
         }
         return ACCENTS[Arrays.asList(ACCENT.values).indexOf(get(ACCENT))];
+    }
+
+    /** True when Animations is on and so is this one effect. */
+    boolean anim(Choice effect) {
+        return "on".equals(get(ANIM)) && "on".equals(get(effect));
     }
 
     Theme theme() {

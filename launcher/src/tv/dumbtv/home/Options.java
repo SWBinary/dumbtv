@@ -87,6 +87,12 @@ public final class Options extends Activity {
         refresh();
     }
 
+    @Override
+    public void finish() {
+        super.finish();
+        Home.fade(this, cfg);
+    }
+
     private void refresh() {
         for (Runnable r : refreshers) r.run();
     }
@@ -121,7 +127,9 @@ public final class Options extends Activity {
             boolean off = (c == Config.DIM || c == Config.ROTATE)
                     && !"image".equals(cfg.get(Config.BACKGROUND))
                     && !"adaptive-tint".equals(cfg.get(Config.BACKGROUND))
-                    || c == Config.SWITCH && "off".equals(cfg.get(Config.INPUTS));
+                    || c == Config.SWITCH && "off".equals(cfg.get(Config.INPUTS))
+                    || (c == Config.ANIM_FOCUS || c == Config.ANIM_FADES || c == Config.ANIM_RETRO)
+                    && "off".equals(cfg.get(Config.ANIM));
             row.setAlpha(off ? 0.4f : 1f);
         };
         row.setOnFocusChangeListener((v, has) -> show.run());

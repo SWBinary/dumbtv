@@ -323,14 +323,14 @@ public final class Home extends Activity {
                 unlockOpened = false;
             } else if (!unlockOpened && e.getEventTime() - e.getDownTime() >= UNLOCK_MS) {
                 unlockOpened = true;
-                startActivity(new Intent(this, Options.class));
+                openOptions();
             }
             return true;
         }
         if (code == KeyEvent.KEYCODE_MENU) {
             View f = getCurrentFocus();
             if (f instanceof Tile) menu((Tile) f);
-            else startActivity(new Intent(this, Options.class));
+            else openOptions();
             return true;
         }
         return super.onKeyDown(code, e);
@@ -499,7 +499,7 @@ public final class Home extends Activity {
         under.leftMargin = dp(2);
         when.addView(meter, under);
         head.addView(when, new LinearLayout.LayoutParams(0, WRAP, 1f));
-        head.addView(chip("Options", v -> startActivity(new Intent(this, Options.class))));
+        head.addView(chip("Options", v -> openOptions()));
         head.addView(chip("Settings", v -> openSettings()));
         column.addView(head, new LinearLayout.LayoutParams(MATCH, WRAP));
 
@@ -553,7 +553,8 @@ public final class Home extends Activity {
         v.setClickable(true);
         v.setOnClickListener(click);
         v.setOnFocusChangeListener((view, has) -> {
-            view.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f).setDuration(110).start();
+            float scale = has && cfg.anim(Config.ANIM_FOCUS) ? 1.06f : 1f;
+            view.animate().scaleX(scale).scaleY(scale).setDuration(110).start();
             if (has) focusBackground(null);
         });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
@@ -574,10 +575,22 @@ public final class Home extends Activity {
         }
         meter.setVisibility("on".equals(cfg.get(Config.MEMORY)) ? View.VISIBLE : View.GONE);
         meter.setAccent(accent);
+        meter.setEase(cfg.anim(Config.ANIM_FADES));
         render(apps);
         render(inputs);
         background();
         tick();
+    }
+
+    private void openOptions() {
+        startActivity(new Intent(this, Options.class));
+        fade(this, cfg);
+    }
+
+    /** Options › Fades: a short fade between screens, or none at all. */
+    static void fade(Activity a, Config cfg) {
+        if (cfg.anim(Config.ANIM_FADES)) a.overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
+        else a.overridePendingTransition(0, 0);
     }
 
     /** A new theme: the views take their colours and fonts when built, so build them again. */
@@ -593,6 +606,10 @@ public final class Home extends Activity {
         stopColorAnimation();
         backgroundMode = null;
         wallKey = null;
+        if (cfg.anim(Config.ANIM_FADES)) {
+            root.setAlpha(0f);
+            root.animate().alpha(1f).setDuration(150).start();
+        }
     }
 
     /** Rebuilds the app list, keeping loaded art for every package except {@code changed}. */
@@ -659,9 +676,10 @@ public final class Home extends Activity {
         int w = size[0], h = Catalog.APPS.equals(row.kind) ? size[1] : Math.round(size[1] * 0.56f);
         String labels = cfg.get(Config.LABELS);
         int accent = cfg.accent();
+        boolean zoom = cfg.anim(Config.ANIM_FOCUS);
         int index = 0, restore = -1;
         for (Item it : shown) {
-            Tile t = new Tile(this, it, row.kind, Catalog.label(cfg, it), w, h, labels, accent);
+            Tile t = new Tile(this, it, row.kind, Catalog.label(cfg, it), w, h, labels, accent, zoom);
             t.setOnClickListener(v -> open((Tile) v));
             t.setOnFocusChangeListener((v, has) -> {
                 if (has) focusBackground(((Tile) v).item);
@@ -728,7 +746,8 @@ public final class Home extends Activity {
         if (color == targetColor) return;
         targetColor = color;
         stopColorAnimation();
-        if (Settings.Global.getFloat(getContentResolver(), "animator_duration_scale", 1f) == 0f) {
+        if (!cfg.anim(Config.ANIM_FADES)
+                || Settings.Global.getFloat(getContentResolver(), "animator_duration_scale", 1f) == 0f) {
             setAdaptiveColor(color);
             return;
         }

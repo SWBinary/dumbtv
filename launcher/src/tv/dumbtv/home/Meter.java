@@ -29,6 +29,7 @@ final class Meter extends View {
     private int accent = Ui.TEXT;
     private float shown = -1;
     private ValueAnimator animation;
+    private boolean ease = true;
 
     Meter(Context c) {
         super(c);
@@ -68,6 +69,11 @@ final class Meter extends View {
         invalidate();
     }
 
+    /** Options › Fades: off makes the bar jump to the new level. */
+    void setEase(boolean on) {
+        ease = on;
+    }
+
     /** Reads memory now; the bar eases to the new level, except the first time. */
     void update(ActivityManager am) {
         if (am == null) return;
@@ -76,7 +82,7 @@ final class Meter extends View {
         label = label(info.availMem, info.totalMem) + (low ? " · running low" : "");
         float target = used(info.availMem, info.totalMem);
         if (animation != null) animation.cancel();
-        if (shown < 0) {
+        if (shown < 0 || !ease) {
             shown = target;
         } else if (Math.abs(target - shown) > 0.001f) {
             animation = ValueAnimator.ofFloat(shown, target);

@@ -31,11 +31,13 @@ final class Tile extends View {
     private final Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint inner = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint under = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final boolean zoom;
     private boolean moving;
 
     Tile(Context c, Item item, String kind, CharSequence title, int cardW, int cardH,
-            String labels, int accent) {
+            String labels, int accent, boolean zoom) {
         super(c);
+        this.zoom = zoom;
         this.item = item;
         this.kind = kind;
         this.title = title;
@@ -91,7 +93,7 @@ final class Tile extends View {
     protected void onFocusChanged(boolean focused, int direction, Rect previous) {
         super.onFocusChanged(focused, direction, previous);
         animate().cancel();
-        if (focused) {
+        if (focused && zoom) {
             animate().scaleX(FOCUS_SCALE).scaleY(FOCUS_SCALE).setDuration(110).start();
         } else {
             setScaleX(1f);
