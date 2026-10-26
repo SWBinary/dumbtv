@@ -33,11 +33,12 @@ public final class Options extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         cfg = Config.get(this);
+        Ui.use(cfg.theme());
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFocusable(false);
         scroll.setVerticalScrollBarEnabled(false);
-        scroll.setBackgroundColor(0xFF0C0C0E);
+        scroll.setBackgroundColor(Ui.PAGE);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         list.setPadding(dp(56), dp(40), dp(56), dp(40));
@@ -133,6 +134,10 @@ public final class Options extends Activity {
         int i = Arrays.asList(c.values).indexOf(cfg.get(c));
         int n = c.values.length;
         cfg.set(c.key, c.values[((i + by) % n + n) % n]);
+        if (c == Config.THEME) {
+            recreate();
+            return true;
+        }
         refresh();
         if (c == Config.LOCK && "on".equals(cfg.get(c))) {
             Toast.makeText(this, "Options and Settings are hidden on the home screen now. "

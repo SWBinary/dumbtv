@@ -10,15 +10,35 @@ import android.util.TypedValue;
 import android.widget.TextView;
 
 final class Ui {
-    static final int TEXT = 0xFFF2F2F3;
-    static final int MUTED = 0x99FFFFFF;
-    static final int FAINT = 0x66FFFFFF;
-    static final int SURFACE = 0xFF1C1D21;
     static final int DIALOG = android.R.style.Theme_DeviceDefault_Dialog_Alert;
-    static final Typeface LIGHT = Typeface.create("sans-serif-light", Typeface.NORMAL);
-    static final Typeface MEDIUM = Typeface.create("sans-serif-medium", Typeface.NORMAL);
+
+    // Copied from the active Theme by use(); views read them when they are built.
+    static Theme theme;
+    static int TEXT, MUTED, FAINT, SURFACE, INPUT_SURFACE, PAGE;
+    static Typeface LIGHT, MEDIUM;
+
+    static {
+        colors(Theme.ORIGINAL);
+    }
 
     private Ui() {}
+
+    /** Called by each screen before it builds its views. */
+    static void use(Theme t) {
+        colors(t);
+        LIGHT = t.light();
+        MEDIUM = t.medium();
+    }
+
+    private static void colors(Theme t) {
+        theme = t;
+        TEXT = t.text;
+        MUTED = t.muted;
+        FAINT = t.faint;
+        SURFACE = t.surface;
+        INPUT_SURFACE = t.inputSurface;
+        PAGE = t.page;
+    }
 
     static int dp(Context c, float v) {
         return Math.round(v * c.getResources().getDisplayMetrics().density);

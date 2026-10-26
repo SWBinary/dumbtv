@@ -56,6 +56,8 @@ final class Config {
         }
     }
 
+    static final Choice THEME = new Choice("theme", "Theme", Theme.ORIGINAL.key,
+            Theme.keys(), Theme.names());
     static final Choice ACCENT = new Choice("accent", "Accent color", "blue",
             new String[] {"white", "blue", "cyan", "green", "amber", "red", "pink", "violet"},
             new String[] {"White", "Blue", "Cyan", "Green", "Amber", "Red", "Pink", "Violet"});
@@ -103,7 +105,7 @@ final class Config {
             new String[] {"off", "on"},
             new String[] {"Off", "On"});
 
-    static final Choice[] CHOICES = {ACCENT, TILES, LAYOUT, ORDER, LABELS, CLOCK, MEMORY, INPUTS, SWITCH, BACKGROUND, DIM, ROTATE, LOCK};
+    static final Choice[] CHOICES = {THEME, ACCENT, TILES, LAYOUT, ORDER, LABELS, CLOCK, MEMORY, INPUTS, SWITCH, BACKGROUND, DIM, ROTATE, LOCK};
 
     /** Folder of wallpapers, next to home.conf, that Background › Image file rotates through. */
     static final String WALLPAPERS = "wallpapers";
@@ -292,6 +294,10 @@ final class Config {
             }
         }
         return ACCENTS[Arrays.asList(ACCENT.values).indexOf(get(ACCENT))];
+    }
+
+    Theme theme() {
+        return Theme.of(get(THEME));
     }
 
     int background() {

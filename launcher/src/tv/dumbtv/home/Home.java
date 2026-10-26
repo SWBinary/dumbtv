@@ -178,6 +178,7 @@ public final class Home extends Activity {
         Future<Map<String, Long>> times = recentFor(Catalog.APPS) == null ? null
                 : io.submit(() -> Recent.times(this));
         tv = (TvInputManager) getSystemService(Context.TV_INPUT_SERVICE);
+        Ui.use(cfg.theme());
         setContentView(build());
 
         IntentFilter f = new IntentFilter();
@@ -565,6 +566,7 @@ public final class Home extends Activity {
 
     private void apply() {
         applied = cfg.version();
+        if (cfg.theme() != Ui.theme) rebuild();
         int accent = cfg.accent();
         for (TextView c : chips) {
             Ui.focusStyle(c, accent, 0x14FFFFFF, dp(18));
@@ -576,6 +578,21 @@ public final class Home extends Activity {
         render(inputs);
         background();
         tick();
+    }
+
+    /** A new theme: the views take their colours and fonts when built, so build them again. */
+    private void rebuild() {
+        Ui.use(cfg.theme());
+        List<Item> appItems = apps.all, inputItems = inputs.all;
+        chips.clear();
+        setContentView(build());
+        apps.all = appItems;
+        inputs.all = inputItems;
+        landed = false;
+        // The new background views start empty: forget what the old ones showed.
+        stopColorAnimation();
+        backgroundMode = null;
+        wallKey = null;
     }
 
     /** Rebuilds the app list, keeping loaded art for every package except {@code changed}. */

@@ -48,7 +48,7 @@ final class Tile extends View {
         radius = Ui.dp(c, 10);
         stroke = Ui.dp(c, 2.5f);
 
-        fill.setColor(app ? Ui.SURFACE : 0xFF17181B);
+        fill.setColor(app ? Ui.SURFACE : Ui.INPUT_SURFACE);
         ring.setStyle(Paint.Style.STROKE);
         ring.setStrokeWidth(stroke);
         ring.setColor(accent);
