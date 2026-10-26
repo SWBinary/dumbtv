@@ -71,18 +71,26 @@ final class Config {
     static final Choice ANIM_FADES = new Choice("anim.fades", "Fades", "on",
             new String[] {"on", "off"},
             new String[] {"On", "Off"});
+    /** Apple TV layout: a light sweeps once over the icon that takes the focus. */
+    static final Choice ANIM_SHINE = new Choice("anim.shine", "Shine", "on",
+            new String[] {"on", "off"},
+            new String[] {"On", "Off"});
     static final Choice ANIM_RETRO = new Choice("anim.retro", "Retro effects", "on",
             new String[] {"on", "off"},
             new String[] {"On", "Off"});
-    static final Choice ACCENT = new Choice("accent", "Accent color", "blue",
-            new String[] {"white", "blue", "cyan", "green", "amber", "red", "pink", "violet"},
-            new String[] {"White", "Blue", "Cyan", "Green", "Amber", "Red", "Pink", "Violet"});
+    static final Choice ACCENT = new Choice("accent", "Accent color", "theme",
+            new String[] {"theme", "white", "blue", "cyan", "green", "amber", "red", "pink", "violet"},
+            new String[] {"Theme", "White", "Blue", "Cyan", "Green", "Amber", "Red", "Pink", "Violet"});
     static final Choice TILES = new Choice("tiles", "Tile size", "medium",
             new String[] {"small", "medium", "large"},
             new String[] {"Small", "Medium", "Large"});
+    /**
+     * Apple TV: no header, favorites as a dock, every other tile in a grid of five 16:9 tiles
+     * per line, a small clock in the corner and Options and Settings as tiles.
+     */
     static final Choice LAYOUT = new Choice("layout", "Layout", "rows",
-            new String[] {"rows", "grid"},
-            new String[] {"Rows", "Grid"});
+            new String[] {"rows", "grid", "tv"},
+            new String[] {"Rows", "Grid", "Apple TV"});
     static final Choice ORDER = new Choice("order", "App order", "custom",
             new String[] {"custom", "recent"},
             new String[] {"Your order", "Recently used"});
@@ -102,16 +110,16 @@ final class Config {
     static final Choice SWITCH = new Choice("switch", "Open inputs with", "auto",
             new String[] {"auto", "tv", "home"},
             new String[] {"Automatic", "The TV's app", "dumbtv home"});
-    static final Choice BACKGROUND = new Choice("background", "Background", "black",
-            new String[] {"black", "graphite", "midnight", "image", "adaptive", "adaptive-tint"},
-            new String[] {"Black", "Graphite", "Midnight", "Image file", "Adaptive solid", "Adaptive wallpaper tint"});
+    static final Choice BACKGROUND = new Choice("background", "Background", "theme",
+            new String[] {"theme", "black", "graphite", "midnight", "image", "adaptive", "adaptive-tint"},
+            new String[] {"Theme", "Black", "Graphite", "Midnight", "Image file", "Adaptive solid", "Adaptive wallpaper tint"});
     static final Choice DIM = new Choice("dim", "Image dim", "40",
             new String[] {"0", "20", "40", "60", "80"},
             new String[] {"0%", "20%", "40%", "60%", "80%"});
 
     static final Choice ROTATE = new Choice("rotate", "Wallpaper rotation", "off",
-            new String[] {"off", "visit", "hourly", "daily", "daytime"},
-            new String[] {"Off", "Every return home", "Every hour", "Every day", "By time of day"});
+            new String[] {"off", "visit", "minute", "hourly", "daily", "daytime"},
+            new String[] {"Off", "Every return home", "Every minute", "Every hour", "Every day", "By time of day"});
 
     /**
      * For a TV children use: hides Options and Settings and turns off the tile menu, so the home
@@ -121,16 +129,18 @@ final class Config {
             new String[] {"off", "on"},
             new String[] {"Off", "On"});
 
-    static final Choice[] CHOICES = {THEME, ANIM, ANIM_FOCUS, ANIM_FADES, ANIM_RETRO, ACCENT, TILES, LAYOUT, ORDER, LABELS, CLOCK, MEMORY, INPUTS, SWITCH, BACKGROUND, DIM, ROTATE, LOCK};
+    static final Choice[] CHOICES = {THEME, ANIM, ANIM_FOCUS, ANIM_FADES, ANIM_SHINE, ANIM_RETRO, ACCENT, TILES, LAYOUT, ORDER, LABELS, CLOCK, MEMORY, INPUTS, SWITCH, BACKGROUND, DIM, ROTATE, LOCK};
 
     /** Folder of wallpapers, next to home.conf, that Background › Image file rotates through. */
     static final String WALLPAPERS = "wallpapers";
     private static final String OFFSET = "wallpaper.offset";
 
+    // Index 0, Theme, is read from the theme; the slot only keeps the indexes in line.
     private static final int[] ACCENTS = {
+        0,
         0xFFFFFFFF, 0xFF3D8BFF, 0xFF2BC4E8, 0xFF34C759, 0xFFFFB340, 0xFFFF5147, 0xFFFF5C9D, 0xFFA07CFF,
     };
-    private static final int[] BACKGROUNDS = {0xFF000000, 0xFF141518, 0xFF0B1220, 0xFF000000, 0xFF141518, 0xFF141518};
+    private static final int[] BACKGROUNDS = {0, 0xFF000000, 0xFF141518, 0xFF0B1220, 0xFF000000, 0xFF141518, 0xFF141518};
 
     private static Config instance;
 
@@ -309,6 +319,7 @@ final class Config {
                 // falls through to the named palette
             }
         }
+        if ("theme".equals(get(ACCENT))) return theme().accent;
         return ACCENTS[Arrays.asList(ACCENT.values).indexOf(get(ACCENT))];
     }
 
@@ -317,11 +328,23 @@ final class Config {
         return "on".equals(get(ANIM)) && "on".equals(get(effect));
     }
 
+    /** What Control Center › Sleep Timer steps through, in minutes; 0 is off. */
+    static final int[] SLEEP_STEPS = {0, 15, 30, 60, 90, 120};
+
+    /** The Sleep Timer step after {@code left} minutes: the first longer one, or off after the last. */
+    static int nextSleep(int left) {
+        for (int step : SLEEP_STEPS) {
+            if (step > left) return step;
+        }
+        return 0;
+    }
+
     Theme theme() {
         return Theme.of(get(THEME));
     }
 
     int background() {
+        if ("theme".equals(get(BACKGROUND))) return theme().ground;
         return BACKGROUNDS[Arrays.asList(BACKGROUND.values).indexOf(get(BACKGROUND))];
     }
 
@@ -332,7 +355,12 @@ final class Config {
 
     /** Steps the rotation forward by one, so the next wallpaper shows now. */
     void nextWallpaper() {
-        set(OFFSET, String.valueOf(offset() + 1));
+        stepWallpaper(1);
+    }
+
+    /** Steps the rotation by {@code by} pictures, back with a negative step. */
+    void stepWallpaper(int by) {
+        set(OFFSET, String.valueOf(offset() + by));
     }
 
     private int offset() {
@@ -409,6 +437,11 @@ final class Config {
             long now = System.currentTimeMillis();
             long step;
             String mode = get(ROTATE);
+            if ("minute".equals(mode)) {
+                // Every minute, among the pictures named for this time of day when there are any.
+                List<File> fit = forPeriod(pool, period());
+                if (fit != null && !fit.isEmpty()) pool = fit;
+            }
             if ("daytime".equals(mode)) {
                 int period = period();
                 List<File> fit = forPeriod(pool, period);
@@ -422,6 +455,7 @@ final class Config {
             }
             switch (mode) {
                 case "visit": step = visits; break;
+                case "minute": step = now / 60_000L; break;
                 case "hourly": step = now / 3_600_000L; break;
                 case "daily": step = (now + TimeZone.getDefault().getOffset(now)) / 86_400_000L; break;
                 default: step = 0;

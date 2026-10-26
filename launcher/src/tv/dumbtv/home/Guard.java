@@ -92,6 +92,17 @@ public final class Guard extends AccessibilityService {
                 ActivityOptions.makeCustomAnimation(c, 0, 0).toBundle());
     }
 
+    /**
+     * Control Center › Sleep. Apps cannot put the TV to sleep, but an accessibility service may
+     * lock the screen (Android 9+), which on a TV is its sleep. Separate from the HOME takeover:
+     * it only borrows the running service. False when that is not possible here.
+     */
+    static boolean sleep() {
+        Guard g = running;
+        // GLOBAL_ACTION_LOCK_SCREEN is 8 (API 28); this is compiled against API 25.
+        return g != null && android.os.Build.VERSION.SDK_INT >= 28 && g.performGlobalAction(8);
+    }
+
     static void amazon(Context c) {
         pause();
         Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)

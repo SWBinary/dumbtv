@@ -1,5 +1,6 @@
 package tv.dumbtv.home;
 
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
@@ -27,7 +28,35 @@ final class Catalog {
     static final String FAVS = "favs";
     private static final String FAV_LIST = FAVS + ".order";
 
+    /** The Options and Settings tiles of the Apple TV layout. */
+    static final String OPTIONS = "dumbtv:options", SETTINGS = "dumbtv:settings";
+
     private Catalog() {}
+
+    static boolean extra(Item it) {
+        return it.id.startsWith("dumbtv:");
+    }
+
+    /**
+     * Options and Settings as app-like tiles, with real art: our own banner for Options, the TV
+     * settings app's banner or icon for Settings (when Fire OS has one to show).
+     */
+    static List<Item> extras(Context c, Intent settings) {
+        PackageManager pm = c.getPackageManager();
+        List<Item> out = new ArrayList<>();
+        Item options = new Item(OPTIONS, "Options", new Intent(c, Options.class));
+        try {
+            options.info = pm.getActivityInfo(new ComponentName(c, Options.class), 0);
+        } catch (PackageManager.NameNotFoundException ignored) {
+            // our own activity: always there
+        }
+        out.add(options);
+        ResolveInfo ri = pm.resolveActivity(settings, 0);
+        Item set = new Item(SETTINGS, ri != null ? ri.loadLabel(pm) : "Settings", settings);
+        if (ri != null) set.info = ri.activityInfo;
+        out.add(set);
+        return out;
+    }
 
     /** Favorites are apps too: same tiles, same menu. */
     static boolean isApp(String kind) {

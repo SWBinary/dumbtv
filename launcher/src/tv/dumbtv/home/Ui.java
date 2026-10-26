@@ -15,7 +15,7 @@ final class Ui {
     // Copied from the active Theme by use(); views read them when they are built.
     static Theme theme;
     static int TEXT, MUTED, FAINT, SURFACE, INPUT_SURFACE, PAGE;
-    static Typeface LIGHT, MEDIUM;
+    static Typeface LIGHT, MEDIUM, CLOCK, LABEL;
 
     static {
         colors(Theme.ORIGINAL);
@@ -28,6 +28,8 @@ final class Ui {
         colors(t);
         LIGHT = t.light();
         MEDIUM = t.medium();
+        CLOCK = t.clock();
+        LABEL = t.label();
     }
 
     private static void colors(Theme t) {
@@ -56,6 +58,18 @@ final class Ui {
         v.setTypeface(face);
         v.setIncludeFontPadding(false);
         return v;
+    }
+
+    /**
+     * Liquid-glass surface: a light top-to-bottom sheen with a hairline edge. Android 9 cannot
+     * blur what lies behind a view, so the glass shows the (already soft) backdrop through it.
+     */
+    static GradientDrawable glass(float radius) {
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0x3DFFFFFF, 0x1FFFFFFF});
+        g.setCornerRadius(radius);
+        g.setStroke(2, 0x40FFFFFF);
+        return g;
     }
 
     static GradientDrawable round(int color, float radius) {

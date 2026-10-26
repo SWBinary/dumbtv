@@ -23,7 +23,10 @@ public final class FocusColorTest {
         check((color & 255) > (color >> 16 & 255), "blue stays blue");
         check((FocusColor.tint(color) >>> 24) == 61, "tint is 24 percent opaque");
         check((FocusColor.tint(color) & 0xFFFFFF) == (color & 0xFFFFFF), "tint keeps color");
-        check("black".equals(Config.BACKGROUND.fallback), "default background unchanged");
+        check("theme".equals(Config.BACKGROUND.fallback), "default background follows the theme");
+        check(Theme.ORIGINAL.ground == 0xFF000000, "the original theme's background is still black");
+        check("theme".equals(Config.ACCENT.fallback) && Theme.ORIGINAL.accent == 0xFF3D8BFF,
+                "the original theme's accent is still blue");
         check("Adaptive wallpaper tint".equals(Config.BACKGROUND.name("adaptive-tint")),
                 "tint is an Options choice");
         check("Amber".equals(Config.ACCENT.name("amber")), "amber accent unchanged");

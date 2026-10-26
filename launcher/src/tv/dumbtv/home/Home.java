@@ -12,6 +12,9 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.media.tv.TvInputManager;
 import android.net.Uri;
 import android.os.Bundle;
@@ -25,6 +28,7 @@ import android.text.style.RelativeSizeSpan;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.FocusFinder;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.EditText;
@@ -76,6 +80,28 @@ public final class Home extends Activity {
     private ValueAnimator colorAnimation;
     private int displayedColor, targetColor;
     private boolean tintWallpaper;
+    /** The Apple TV layout was built; layout changes rebuild the screen like theme changes. */
+    private boolean builtTv;
+    private List<Item> extras;
+    /** Apple TV top shelf: two backdrop layers that cross-fade, and the banner of the focused app. */
+    private ImageView aurora;
+    private View backdrop;
+    private Control control;
+    /** Two wallpaper layers: a new picture fades (and, when zapping, slides) in over the old. */
+    private FrameLayout wallLayer;
+    private ImageView wallBack;
+    private int zapDir;
+    /** Up from the dock: the page slides away and the wallpaper fills the screen. */
+    private boolean immersive, introPending;
+    private View page, scrim, hints, beforeImmersive;
+    private static final android.view.animation.Interpolator EASE =
+            new android.view.animation.PathInterpolator(0.25f, 0.1f, 0f, 1f);
+    /** Child lock as built: it decides whether the clock opens the Control Center. */
+    private boolean builtLocked;
+    /** Space above and below the dock tiles inside the capsule, in dp. */
+    private static final int DOCK_PAD = 26, DOCK_BOTTOM = 26;
+    /** How far the capsule reaches past the icons, in dp. */
+    private static final int DOCK_INSET = 12;
 
     private final BroadcastReceiver packages = new BroadcastReceiver() {
         @Override
@@ -125,7 +151,7 @@ public final class Home extends Activity {
         Row(String kind, String name, LinearLayout parent) {
             this.kind = kind;
             int edge = dp(56), bleed = dp(14);
-            title = Ui.text(Home.this, 12, Ui.FAINT, Ui.MEDIUM);
+            title = Ui.text(Home.this, 12, Ui.FAINT, Ui.LABEL);
             title.setText(name.toUpperCase(Locale.ROOT));
             title.setLetterSpacing(0.14f);
             title.setPadding(edge, dp(20), edge, dp(2));
@@ -150,21 +176,32 @@ public final class Home extends Activity {
             scroll.setClipToPadding(false);
             scroll.setPadding(edge - bleed, 0, edge - bleed, 0);
             scroll.addView(strip, new FrameLayout.LayoutParams(WRAP, WRAP));
-            grid = new Grid(Home.this);
+            grid = new Grid(Home.this, gapDp());
+            if (builtTv && Catalog.FAVS.equals(kind)) {
+                // Fewer favorites than fit a line sit in the middle of the dock, as on tvOS.
+                scroll.setFillViewport(true);
+                strip.setGravity(Gravity.CENTER_HORIZONTAL);
+                scroll.setBackground(dockCapsule());
+                scroll.setPadding(scroll.getPaddingLeft(), dp(DOCK_PAD - 12), scroll.getPaddingRight(), dp(DOCK_BOTTOM));
+            }
             grid.setPadding(edge, dp(12), edge, dp(8));
             parent.addView(title, new LinearLayout.LayoutParams(MATCH, WRAP));
             parent.addView(scroll, new LinearLayout.LayoutParams(MATCH, WRAP));
             parent.addView(grid, new LinearLayout.LayoutParams(MATCH, WRAP));
         }
 
-        /** Whichever container currently holds the tiles, following Options › Layout. */
+        /**
+         * Whichever container currently holds the tiles, following Options › Layout. In the
+         * Apple TV layout the favorites are the dock and everything else is a grid.
+         */
         ViewGroup tiles() {
+            if (builtTv) return Catalog.FAVS.equals(kind) ? strip : grid;
             return "grid".equals(cfg.get(Config.LAYOUT)) ? grid : strip;
         }
 
         void setVisible(boolean on) {
-            boolean gridMode = "grid".equals(cfg.get(Config.LAYOUT));
-            title.setVisibility(on ? View.VISIBLE : View.GONE);
+            boolean gridMode = tiles() == grid;
+            title.setVisibility(on && !builtTv ? View.VISIBLE : View.GONE);
             scroll.setVisibility(on && !gridMode ? View.VISIBLE : View.GONE);
             grid.setVisibility(on && gridMode ? View.VISIBLE : View.GONE);
         }
@@ -252,6 +289,8 @@ public final class Home extends Activity {
     protected void onPause() {
         super.onPause();
         resumed = false;
+        if (control != null) control.close(false);
+        exitImmersive(false);
         stopColorAnimation();
         targetColor = 0;
         unregisterReceiver(time);
@@ -291,13 +330,94 @@ public final class Home extends Activity {
         if (resumed) focusFirst();
     }
 
+    /**
+     * The wallpaper view: left and right step through the pictures, down, Back or OK return to
+     * the dock. Keys act on release where their release would otherwise reach the page.
+     */
+    private boolean immersiveKey(KeyEvent e) {
+        int code = e.getKeyCode();
+        boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+        switch (code) {
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (down) zap(code == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1);
+                return true;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (down) exitImmersive(true);
+                return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+                return true;
+            case KeyEvent.KEYCODE_BACK:
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_MENU:
+                if (!down) exitImmersive(true);
+                return true;
+            default:
+                return super.dispatchKeyEvent(e);
+        }
+    }
+
+    private void enterImmersive() {
+        immersive = true;
+        beforeImmersive = getCurrentFocus();
+        boolean fade = cfg.anim(Config.ANIM_FADES);
+        // tvOS: the dock sinks away, the shade lifts and the picture comes forward.
+        move(page, fade ? 480 : 0).translationY(root.getHeight() * 0.55f).alpha(0f).start();
+        if (scrim != null) move(scrim, fade ? 480 : 0).alpha(0f).start();
+        move(wallLayer, fade ? 1200 : 0).scaleX(1.06f).scaleY(1.06f).start();
+        hints.setVisibility(View.VISIBLE);
+        move(hints, fade ? 400 : 0).alpha(1f).setStartDelay(fade ? 250 : 0).start();
+    }
+
+    private void exitImmersive(boolean animate) {
+        if (!immersive) return;
+        immersive = false;
+        long d = animate && cfg.anim(Config.ANIM_FADES) ? 420 : 0;
+        move(page, d).translationY(0f).alpha(1f).start();
+        if (scrim != null) move(scrim, d).alpha(1f).start();
+        move(wallLayer, d).scaleX(1f).scaleY(1f).start();
+        move(hints, d / 2).alpha(0f).withEndAction(() -> hints.setVisibility(View.GONE)).start();
+        if (beforeImmersive != null && beforeImmersive.isAttachedToWindow()) beforeImmersive.requestFocus();
+        beforeImmersive = null;
+    }
+
+    private android.view.ViewPropertyAnimator move(View v, long duration) {
+        v.animate().cancel();
+        return v.animate().setInterpolator(EASE).setStartDelay(0).setDuration(duration);
+    }
+
+    /** One picture on in the wallpaper view; only with Background › Image file. */
+    private void zap(int by) {
+        if (!"image".equals(cfg.get(Config.BACKGROUND))) return;
+        zapDir = by;
+        cfg.stepWallpaper(by);
+        applied = cfg.version();
+        background();
+    }
+
     @Override
     public void onBackPressed() {
+        if (control != null && control.isOpen()) {
+            control.close(true);
+            return;
+        }
         focusFirst();
     }
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        if (immersive) return immersiveKey(e);
+        if (builtTv && moving == null && (control == null || !control.isOpen())
+                && e.getAction() == KeyEvent.ACTION_DOWN && e.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP
+                && e.getRepeatCount() == 0) {
+            View f = getCurrentFocus();
+            // Nothing above the dock to move to: up opens the wallpaper instead.
+            if (f instanceof Tile && FocusFinder.getInstance().findNextFocus(root, f, View.FOCUS_UP) == null) {
+                enterImmersive();
+                return true;
+            }
+        }
         if (moving == null) return super.dispatchKeyEvent(e);
         if (e.getAction() == KeyEvent.ACTION_DOWN) {
             switch (e.getKeyCode()) {
@@ -334,9 +454,13 @@ public final class Home extends Activity {
             }
             return true;
         }
+        if (code == KeyEvent.KEYCODE_MENU && control != null) {
+            control.toggle();
+            return true;
+        }
         if (code == KeyEvent.KEYCODE_MENU) {
             View f = getCurrentFocus();
-            if (f instanceof Tile) menu((Tile) f);
+            if (f instanceof Tile && !builtTv) menu((Tile) f);
             else openOptions();
             return true;
         }
@@ -367,14 +491,16 @@ public final class Home extends Activity {
     private List<int[]> rowBlocks(View content) {
         List<int[]> rows = new ArrayList<>();
         for (Row row : new Row[] {favs, apps, inputs}) {
+            boolean titled = row.title.getVisibility() == View.VISIBLE;
             if (row.scroll.getVisibility() == View.VISIBLE) {
-                rows.add(new int[] {topIn(row.title, content), topIn(row.scroll, content) + row.scroll.getHeight()});
+                int top = topIn(titled ? row.title : row.scroll, content);
+                rows.add(new int[] {top, topIn(row.scroll, content) + row.scroll.getHeight()});
             } else if (row.grid.getVisibility() == View.VISIBLE) {
                 int gridTop = topIn(row.grid, content), lastTop = Integer.MIN_VALUE;
                 for (int i = 0; i < row.grid.getChildCount(); i++) {
                     View t = row.grid.getChildAt(i);
                     if (t.getTop() == lastTop) continue;
-                    int start = lastTop == Integer.MIN_VALUE ? topIn(row.title, content) : gridTop + t.getTop() - dp(12);
+                    int start = lastTop == Integer.MIN_VALUE && titled ? topIn(row.title, content) : gridTop + t.getTop() - dp(12);
                     lastTop = t.getTop();
                     rows.add(new int[] {start, gridTop + t.getBottom() + dp(8)});
                 }
@@ -424,14 +550,26 @@ public final class Home extends Activity {
     }
 
     private View build() {
+        builtTv = "tv".equals(cfg.get(Config.LAYOUT));
+        backdrop = null;
+        control = null;
+        builtLocked = locked();
         root = new FrameLayout(this);
+        immersive = false;
+        introPending = true;
+        wallLayer = new FrameLayout(this);
+        wallBack = new ImageView(this);
         wall = new ImageView(this);
-        wall.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        root.addView(wall, new FrameLayout.LayoutParams(MATCH, MATCH));
+        for (ImageView v : new ImageView[] {wallBack, wall}) {
+            v.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            wallLayer.addView(v, new FrameLayout.LayoutParams(MATCH, MATCH));
+        }
+        root.addView(wallLayer, new FrameLayout.LayoutParams(MATCH, MATCH));
         shade = new View(this);
         root.addView(shade, new FrameLayout.LayoutParams(MATCH, MATCH));
         tint = new View(this);
         root.addView(tint, new FrameLayout.LayoutParams(MATCH, MATCH));
+        if (builtTv) buildBackdrop();
 
         ScrollView scroll = new ScrollView(this) {
             /** Scrolls in whole rows: the focused row shows complete, and a row starts at the top edge. */
@@ -470,6 +608,7 @@ public final class Home extends Activity {
         scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         scroll.setClipChildren(false);
         root.addView(scroll, new FrameLayout.LayoutParams(MATCH, MATCH));
+        page = scroll;
 
         LinearLayout column = new LinearLayout(this) {
             @Override
@@ -484,18 +623,16 @@ public final class Home extends Activity {
         column.setOrientation(LinearLayout.VERTICAL);
         column.setClipChildren(false);
         column.setClipToPadding(false);
-        column.setPadding(0, dp(40), 0, dp(32));
+        column.setPadding(0, builtTv ? 0 : dp(40), 0, dp(32));
         scroll.addView(column, new FrameLayout.LayoutParams(MATCH, WRAP));
+        // Apple TV: the top of the page shows the wallpaper; it scrolls away above the dock.
+        if (builtTv) column.addView(new View(this), new LinearLayout.LayoutParams(MATCH, shelfHeight()));
 
-        LinearLayout head = new LinearLayout(this);
-        head.setClipChildren(false);
-        head.setClipToPadding(false);
-        head.setGravity(Gravity.TOP);
-        head.setPadding(dp(56), 0, dp(56), dp(12));
         LinearLayout when = new LinearLayout(this);
         when.setOrientation(LinearLayout.VERTICAL);
-        clock = Ui.text(this, 52, Ui.TEXT, Ui.LIGHT);
-        date = Ui.text(this, 15, Ui.MUTED, Ui.MEDIUM);
+        clock = Ui.text(this, builtTv ? 44 : 52, Ui.TEXT, Ui.CLOCK);
+        date = Ui.text(this, 15, Ui.MUTED, Ui.LABEL);
+        if (Ui.theme.caps) date.setAllCaps(true);
         date.setPadding(dp(2), dp(8), 0, 0);
         when.addView(clock);
         when.addView(date);
@@ -505,10 +642,37 @@ public final class Home extends Activity {
         under.topMargin = dp(12);
         under.leftMargin = dp(2);
         when.addView(meter, under);
-        head.addView(when, new LinearLayout.LayoutParams(0, WRAP, 1f));
-        head.addView(chip("Options", v -> openOptions()));
-        head.addView(chip("Settings", v -> openSettings()));
-        column.addView(head, new LinearLayout.LayoutParams(MATCH, WRAP));
+        if (builtTv) {
+            // A small clock in the top right corner, above the page; no date, no buttons.
+            date.setVisibility(View.GONE);
+            // Glass type: bright at the top, see-through towards the bottom, on a soft shadow.
+            // Always shown, over the page and over the wallpaper view; ☰ opens Control Center.
+            clock.setShadowLayer(dp(10), 0, dp(2), 0x59000000);
+            clock.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                if (b - t == ob - ot) return;
+                clock.getPaint().setShader(new android.graphics.LinearGradient(0, 0, 0, b - t,
+                        0xFAFFFFFF, 0x9EFFFFFF, android.graphics.Shader.TileMode.CLAMP));
+                clock.invalidate();
+            });
+            when.setGravity(Gravity.END);
+            FrameLayout.LayoutParams corner = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END);
+            corner.topMargin = dp(32);
+            corner.rightMargin = dp(56);
+            root.addView(when, corner);
+            hints = buildHints();
+            root.addView(hints, new FrameLayout.LayoutParams(MATCH, MATCH));
+            if (!locked()) control = new Control(this, cfg, root, when, this::openSettings, this::openOptions);
+        } else {
+            LinearLayout head = new LinearLayout(this);
+            head.setClipChildren(false);
+            head.setClipToPadding(false);
+            head.setGravity(Gravity.TOP);
+            head.setPadding(dp(56), 0, dp(56), dp(12));
+            head.addView(when, new LinearLayout.LayoutParams(0, WRAP, 1f));
+            head.addView(chip("Options", v -> openOptions()));
+            head.addView(chip("Settings", v -> openSettings()));
+            column.addView(head, new LinearLayout.LayoutParams(MATCH, WRAP));
+        }
 
         favs = new Row(Catalog.FAVS, "Favorites", column);
         apps = new Row(Catalog.APPS, "Apps", column);
@@ -548,6 +712,70 @@ public final class Home extends Activity {
         return best;
     }
 
+    /** The top shelf above the dock in the Apple TV layout: the dock ends about 9/10 down. */
+    private int shelfHeight() {
+        return getResources().getDisplayMetrics().heightPixels * 68 / 100;
+    }
+
+    private float gapDp() {
+        return builtTv ? 24 : 18;
+    }
+
+    /**
+     * Apple TV layout: behind everything a soft aurora in the theme's colours, or your wallpaper
+     * (Background › Image file), with a light shade at the top for the clock and a darker one
+     * towards the bottom for the grid.
+     */
+    /** Two glass arrows at the sides of the wallpaper view: left and right change the picture. */
+    private View buildHints() {
+        FrameLayout h = new FrameLayout(this);
+        for (int side = 0; side < 2; side++) {
+            TextView arrow = Ui.text(this, 30, Ui.TEXT, Ui.LIGHT);
+            arrow.setText(side == 0 ? "‹" : "›");
+            arrow.setGravity(Gravity.CENTER);
+            arrow.setBackground(Ui.glass(dp(28)));
+            FrameLayout.LayoutParams at = new FrameLayout.LayoutParams(dp(56), dp(56),
+                    Gravity.CENTER_VERTICAL | (side == 0 ? Gravity.START : Gravity.END));
+            at.leftMargin = at.rightMargin = dp(40);
+            h.addView(arrow, at);
+        }
+        h.setAlpha(0f);
+        h.setVisibility(View.GONE);
+        return h;
+    }
+
+    private void buildBackdrop() {
+        FrameLayout layers = new FrameLayout(this);
+        aurora = new ImageView(this);
+        aurora.setScaleType(ImageView.ScaleType.FIT_XY);
+        aurora.setImageBitmap(Backdrop.aurora(Ui.theme.aurora));
+        layers.addView(aurora, new FrameLayout.LayoutParams(MATCH, MATCH));
+        scrim = new View(this);
+        scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0x26000000, 0x00000000, 0x00000000, 0x73000000, 0xD9000000}));
+        layers.addView(scrim, new FrameLayout.LayoutParams(MATCH, MATCH));
+        backdrop = layers;
+        // Above the wallpaper, below the page: with a wallpaper the aurora hides and the shade stays.
+        root.addView(layers, new FrameLayout.LayoutParams(MATCH, MATCH));
+    }
+
+    /**
+     * The dock: a capsule of frosted glass that hugs the favorites, inset from the screen edges.
+     * It sits on the dock's scroll view, which spans the width, so it stays put while the dock
+     * scrolls; the insets keep it DOCK_INSET outside the tiles and clear of the name under them.
+     * Its corners are concentric with the icons': icon radius plus the gap, as Apple draws them.
+     */
+    private Drawable dockCapsule() {
+        GradientDrawable glass = Ui.glass(Tile.iconRadius(cardSize()[0]) + dp(DOCK_INSET));
+        LayerDrawable capsule = new LayerDrawable(new Drawable[] {glass});
+        // Scroll padding + strip padding put the tiles DOCK_PAD below the top; the name under a
+        // tile (26 dp), the strip's bottom padding and the scroll's bottom padding follow it.
+        int side = dp(56 - DOCK_INSET), top = dp(DOCK_PAD - DOCK_INSET);
+        int bottom = dp(26 + 8 + DOCK_BOTTOM - DOCK_INSET);
+        capsule.setLayerInset(0, side, top, side, bottom);
+        return capsule;
+    }
+
     private boolean locked() {
         return "on".equals(cfg.get(Config.LOCK));
     }
@@ -575,10 +803,11 @@ public final class Home extends Activity {
 
     private void apply() {
         applied = cfg.version();
-        if (cfg.theme() != Ui.theme) rebuild();
+        if (cfg.theme() != Ui.theme || "tv".equals(cfg.get(Config.LAYOUT)) != builtTv
+                || builtTv && locked() != builtLocked) rebuild();
         int accent = cfg.accent();
         for (TextView c : chips) {
-            Ui.focusStyle(c, accent, 0x14FFFFFF, dp(18));
+            Ui.focusStyle(c, accent, Ui.theme.chip, dp(Ui.theme.chipRadius));
             c.setVisibility(locked() ? View.GONE : View.VISIBLE);
         }
         meter.setVisibility("on".equals(cfg.get(Config.MEMORY)) ? View.VISIBLE : View.GONE);
@@ -602,7 +831,10 @@ public final class Home extends Activity {
         else a.overridePendingTransition(0, 0);
     }
 
-    /** A new theme: the views take their colours and fonts when built, so build them again. */
+    /**
+     * A new theme or layout: the views take their colours, fonts and places when built, so build
+     * them again.
+     */
     private void rebuild() {
         Ui.use(cfg.theme());
         List<Item> appItems = apps.all, inputItems = inputs.all;
@@ -674,8 +906,8 @@ public final class Home extends Activity {
         View focused = getCurrentFocus();
         String keep = focused instanceof Tile && ((Tile) focused).kind.equals(row.kind)
                 ? ((Tile) focused).item.id : null;
-        boolean gridMode = "grid".equals(cfg.get(Config.LAYOUT));
-        ViewGroup target = gridMode ? row.grid : row.strip;
+        ViewGroup target = row.tiles();
+        boolean gridMode = target == row.grid;
         row.strip.removeAllViews();
         row.grid.removeAllViews();
 
@@ -684,17 +916,25 @@ public final class Home extends Activity {
         List<Item> all = row == favs ? apps.all : row.all;
         List<Item> shown = enabled ? Catalog.visible(cfg, row.kind, all, recentFor(row.kind))
                 : new ArrayList<>();
+        if (builtTv && row == apps && !locked()) {
+            if (extras == null) extras = Catalog.extras(this, settingsIntent());
+            shown.addAll(extras);
+        }
         int[] size = cardSize();
         int w = size[0], h = Catalog.isApp(row.kind) ? size[1] : Math.round(size[1] * 0.56f);
         String labels = cfg.get(Config.LABELS);
         int accent = cfg.accent();
         boolean zoom = cfg.anim(Config.ANIM_FOCUS);
+        boolean shine = cfg.anim(Config.ANIM_SHINE);
+        boolean intro = row == favs && builtTv && introPending && !shown.isEmpty() && cfg.anim(Config.ANIM_FADES);
+        if (intro) introPending = false;
         int index = 0, restore = -1;
         for (Item it : shown) {
-            Tile t = new Tile(this, it, row.kind, Catalog.label(cfg, it), w, h, labels, accent, zoom);
+            Tile t = new Tile(this, it, row.kind, Catalog.label(cfg, it), w, h, labels, accent, zoom, builtTv, shine);
             t.setOnClickListener(v -> open((Tile) v));
             t.setOnFocusChangeListener((v, has) -> {
-                if (has) focusBackground(((Tile) v).item);
+                if (!has) return;
+                focusBackground(((Tile) v).item);
             });
             t.setOnLongClickListener(v -> {
                 if (!locked()) menu((Tile) v);
@@ -704,8 +944,16 @@ public final class Home extends Activity {
                 target.addView(t, new ViewGroup.LayoutParams(WRAP, WRAP));
             } else {
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
-                lp.rightMargin = dp(18);
+                // Gaps between tiles only, so a centered dock stays centered.
+                if (index > 0) lp.leftMargin = dp(gapDp());
                 target.addView(t, lp);
+            }
+            if (intro) {
+                // The dock floats in on each fresh build, icon after icon.
+                t.setAlpha(0f);
+                t.setTranslationY(dp(28));
+                t.animate().alpha(1f).translationY(0f).setStartDelay(index * 45L).setDuration(420)
+                        .setInterpolator(EASE).start();
             }
             if (it.id.equals(keep)) restore = index;
             index++;
@@ -785,6 +1033,11 @@ public final class Home extends Activity {
     }
 
     private int[] cardSize() {
+        if (builtTv) {
+            // Five 16:9 tiles fill a line between the 56 dp edges, with the 24 dp gaps.
+            int w = (getResources().getDisplayMetrics().widthPixels - 2 * dp(56) - 4 * dp(24)) / 5;
+            return new int[] {w, w * 9 / 16};
+        }
         switch (cfg.get(Config.TILES)) {
             case "small":
                 return new int[] {dp(144), dp(81)};
@@ -803,8 +1056,8 @@ public final class Home extends Activity {
         if (first == null) first = apps.tiles().getChildAt(0);
         if (first == null) first = inputs.tiles().getChildAt(0);
         landed = favs.tiles().getChildCount() > 0 || apps.tiles().getChildCount() > 0;
-        if (first == null) first = chips.get(0);
-        first.requestFocus();
+        if (first == null && !chips.isEmpty()) first = chips.get(0);
+        if (first != null) first.requestFocus();
     }
 
     private void tick() {
@@ -830,6 +1083,10 @@ public final class Home extends Activity {
 
     private void background() {
         String mode = cfg.get(Config.BACKGROUND);
+        if (backdrop != null) {
+            // Background › Image file shows your own pictures instead of the aurora.
+            aurora.setVisibility("image".equals(mode) ? View.GONE : View.VISIBLE);
+        }
         boolean image = "image".equals(mode) || "adaptive-tint".equals(mode);
         File file = image ? cfg.wallpaper() : null;
         tintWallpaper = "adaptive-tint".equals(mode) && file != null;
@@ -867,15 +1124,51 @@ public final class Home extends Activity {
         wallKey = key;
         if (file == null) {
             wall.setImageDrawable(null);
+            wallBack.setImageDrawable(null);
             return;
         }
         io.execute(() -> {
             Bitmap b = decode(file, getResources().getDisplayMetrics().widthPixels,
                     getResources().getDisplayMetrics().heightPixels);
             ui.post(() -> {
-                if (key.equals(wallKey)) wall.setImageBitmap(b);
+                if (!key.equals(wallKey)) return;
+                showWall(b);
             });
         });
+    }
+
+    /**
+     * Puts {@code b} on screen. With Fades the old picture stays behind while the new one fades
+     * in over it; in the wallpaper view it also slides in from the side it was asked for.
+     */
+    private void showWall(Bitmap b) {
+        int dir = zapDir;
+        zapDir = 0;
+        if (!cfg.anim(Config.ANIM_FADES) || wall.getDrawable() == null) {
+            wall.setImageBitmap(b);
+            wall.setAlpha(1f);
+            wallBack.setImageDrawable(null);
+            return;
+        }
+        ImageView old = wall;
+        wall = wallBack;
+        wallBack = old;
+        old.animate().cancel();
+        wall.animate().cancel();
+        wallLayer.removeView(wall);
+        wallLayer.addView(wall);
+        wall.setImageBitmap(b);
+        wall.setAlpha(0f);
+        wall.setTranslationX(dir * dp(80));
+        ImageView front = wall;
+        wall.animate().alpha(1f).translationX(0f).setInterpolator(EASE).setDuration(dir != 0 ? 520 : 1000)
+                .withEndAction(() -> {
+                    if (wall == front) wallBack.setImageDrawable(null);
+                }).start();
+        if (dir != 0) {
+            old.animate().translationX(-dir * dp(80)).setInterpolator(EASE).setDuration(520)
+                    .withEndAction(() -> old.setTranslationX(0f)).start();
+        }
     }
 
     private static Bitmap decode(File f, int w, int h) {
@@ -895,13 +1188,25 @@ public final class Home extends Activity {
      * Guard then replaces with ours. The TV settings entry point opens the real settings screen.
      */
     private void openSettings() {
+        launch(settingsIntent(), null);
+    }
+
+    private Intent settingsIntent() {
         Intent tvSettings = new Intent(Intent.ACTION_MAIN)
                 .addCategory("android.intent.category.LEANBACK_SETTINGS");
         boolean found = tvSettings.resolveActivity(getPackageManager()) != null;
-        launch(found ? tvSettings : new Intent(Settings.ACTION_SETTINGS), null);
+        return found ? tvSettings : new Intent(Settings.ACTION_SETTINGS);
     }
 
     private void open(Tile t) {
+        if (Catalog.OPTIONS.equals(t.item.id)) {
+            openOptions();
+            return;
+        }
+        if (Catalog.SETTINGS.equals(t.item.id)) {
+            openSettings();
+            return;
+        }
         if (Catalog.isApp(t.kind)) {
             launch(new Intent(t.item.intent), t.item.id);
             return;
@@ -926,6 +1231,7 @@ public final class Home extends Activity {
     }
 
     private void menu(Tile t) {
+        if (Catalog.extra(t.item)) return;
         boolean app = Catalog.isApp(t.kind);
         String kind = app ? Catalog.APPS : Catalog.INPUTS;
         boolean fav = app && Catalog.favorite(cfg, t.item);
@@ -1013,7 +1319,10 @@ public final class Home extends Activity {
         ViewGroup strip = (ViewGroup) t.getParent();
         if (strip == null) return;
         List<String> ids = new ArrayList<>();
-        for (int i = 0; i < strip.getChildCount(); i++) ids.add(((Tile) strip.getChildAt(i)).item.id);
+        for (int i = 0; i < strip.getChildCount(); i++) {
+            Item it = ((Tile) strip.getChildAt(i)).item;
+            if (!Catalog.extra(it)) ids.add(it.id);
+        }
         Catalog.saveOrder(cfg, t.kind, ids);
         applied = cfg.version();
     }
