@@ -8,11 +8,14 @@ A home screen for Fire TV that does one job: show your apps and your HDMI inputs
 
 - **54 KB.** Plain Java and Android views. No AndroidX, Kotlin, Compose, Play
   Services or any other library.
-- **No network.** There is no `INTERNET` permission, so Android will not let it
-  open a connection.
-- **No permissions on Fire OS 7 and 8.** It declares three (usage access, task
-  order, boot completed), each limited to Android 8.1 and earlier, for the Fire OS 6
-  Keeper below. Check: `aapt2 dump permissions dumbtv-home.apk`.
+- **Network only for wallpapers (this fork).** The `INTERNET` permission is used by
+  one class, `Fetch.java`: once a week it downloads the ten best-liked Unsplash photos
+  per time of day into the wallpapers folder. It stays off until an Unsplash API key is
+  set (`unsplash.key=` in `home.conf`); nothing else opens a connection.
+- **One permission on Fire OS 7 and 8:** `INTERNET`, for the wallpaper fetch above.
+  The other three (usage access, task order, boot completed) are limited to Android
+  8.1 and earlier, for the Fire OS 6 Keeper below. Check:
+  `aapt2 dump permissions dumbtv-home.apk`.
 - **No ads, no recommended rows, no account, no analytics, no update checks.**
 - About 60–70 MB of memory with the home screen showing, about 37 MB while an app
   plays (measured on a Fire TV Edition television with 1.4 GB of RAM).

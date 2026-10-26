@@ -353,6 +353,13 @@ final class Config {
         visits++;
     }
 
+    /** The screensaver's pictures: those named for this time of day, or all of them. */
+    List<File> showcase() {
+        List<File> pool = wallpapers();
+        List<File> fit = forPeriod(pool, period());
+        return fit != null && !fit.isEmpty() ? fit : pool;
+    }
+
     /** Steps the rotation forward by one, so the next wallpaper shows now. */
     void nextWallpaper() {
         stepWallpaper(1);

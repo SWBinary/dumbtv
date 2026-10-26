@@ -15,7 +15,7 @@ import android.content.pm.PackageManager;
  */
 public final class Sleep extends BroadcastReceiver {
     static final String KEY = "sleep.at";
-    private static final String SCREENSAVER = "com.amazon.ftv.screensaver";
+    private static final String SCREENSAVER = Catalog.SCREENSAVER;
 
     @Override
     public void onReceive(Context c, Intent i) {
@@ -27,8 +27,9 @@ public final class Sleep extends BroadcastReceiver {
         if (!Guard.sleep()) screensaver(c);
     }
 
-    /** The TV's screensaver app; false where there is none. */
+    /** Our screensaver, the wallpaper view; Amazon's when ours cannot start. */
     static boolean screensaver(Context c) {
+        if (Showcase.start(c)) return true;
         PackageManager pm = c.getPackageManager();
         Intent i = pm.getLeanbackLaunchIntentForPackage(SCREENSAVER);
         if (i == null) i = pm.getLaunchIntentForPackage(SCREENSAVER);

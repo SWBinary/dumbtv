@@ -101,8 +101,37 @@ final class Catalog {
         }
     }
 
+    /** The screensaver app on Fire OS; in the Apple TV layout its tile opens ours. */
+    static final String SCREENSAVER = "com.amazon.ftv.screensaver";
+
+    /**
+     * Apple TV layout: our own icon for tiles whose art is a wide wordmark or a dated logo, so
+     * they sit with the rest; null keeps the app's own art.
+     */
+    static android.graphics.drawable.Drawable appleIcon(String id) {
+        switch (id) {
+            case OPTIONS:
+                return new Icon(0xFF9EA3AB, 0xFF5C6169, Glyph.SLIDERS);
+            case SETTINGS:
+                return new Icon(0xFF9EA3AB, 0xFF5C6169, Glyph.GEAR);
+            case "com.amazon.venezia":
+                return new Icon(0xFF38B6FF, 0xFF0B63E5, Glyph.BAG);
+            case SCREENSAVER:
+                return new Icon(0xFF3D438F, 0xFF0C0F2E, Glyph.MOON);
+            default:
+                return null;
+        }
+    }
+
     /** Loads a banner, or an icon when the app ships no banner. Slow: call off the UI thread. */
-    static void art(PackageManager pm, Item it) {
+    static void art(PackageManager pm, Item it, boolean apple) {
+        if (apple) {
+            android.graphics.drawable.Drawable own = appleIcon(it.id);
+            if (own != null) {
+                it.banner = own;
+                return;
+            }
+        }
         if (it.info == null) return;
         it.banner = it.info.loadBanner(pm);
         if (it.banner == null) it.icon = it.info.loadIcon(pm);

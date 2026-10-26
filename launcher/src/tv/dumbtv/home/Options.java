@@ -121,7 +121,7 @@ public final class Options extends Activity {
         back.setImageBitmap(soft != null ? soft : Backdrop.aurora(Ui.theme.aurora));
         frame.addView(back, new FrameLayout.LayoutParams(MATCH, MATCH));
         View shade = new View(this);
-        shade.setBackgroundColor(0x80000000);
+        shade.setBackgroundColor(0xB8000000);
         frame.addView(shade, new FrameLayout.LayoutParams(MATCH, MATCH));
         frame.addView(page, new FrameLayout.LayoutParams(MATCH, MATCH));
         return frame;

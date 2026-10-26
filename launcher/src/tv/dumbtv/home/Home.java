@@ -98,6 +98,14 @@ public final class Home extends Activity {
             new android.view.animation.PathInterpolator(0.25f, 0.1f, 0f, 1f);
     /** Child lock as built: it decides whether the clock opens the Control Center. */
     private boolean builtLocked;
+    /** Something was opened from here (an app, Options, Settings); and HOME asked for the top. */
+    private boolean away, toTop;
+    /** A blurred, dimmed copy of the screen behind a menu; the clock's two sizes; the credit. */
+    private ImageView veil;
+    private View corner, capsuleView;
+    private boolean clockBig;
+    private TextView creditView;
+    private File wallFile;
     /** Space above and below the dock tiles inside the capsule, in dp. */
     private static final int DOCK_PAD = 26, DOCK_BOTTOM = 26;
     /** How far the capsule reaches past the icons, in dp. */
@@ -258,7 +266,7 @@ public final class Home extends Activity {
             onScreen.add(it);
         }
         for (Item it : onScreen) {
-            Catalog.art(getPackageManager(), it);
+            Catalog.art(getPackageManager(), it, builtTv);
             it.artRequested = true;
         }
     }
@@ -272,6 +280,10 @@ public final class Home extends Activity {
         cfg.visited();
         if (cfg.version() != applied) apply();
         else background();
+        if (toTop) focusFirst();
+        toTop = false;
+        Fetch.maybe(cfg);
+        away = false;
         refreshRecent();
         IntentFilter f = new IntentFilter(Intent.ACTION_TIME_TICK);
         f.addAction(Intent.ACTION_TIME_CHANGED);
@@ -327,7 +339,13 @@ public final class Home extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (moving != null) stopMoving();
-        if (resumed) focusFirst();
+        if (resumed) {
+            focusFirst();
+        } else if (!away) {
+            // HOME pressed on the home screen: Fire OS shows Amazon's home for a moment, so we
+            // are paused here, but nothing was opened. Back to the top once we are on screen.
+            toTop = true;
+        }
     }
 
     /**
@@ -366,18 +384,43 @@ public final class Home extends Activity {
         move(page, fade ? 480 : 0).translationY(root.getHeight() * 0.55f).alpha(0f).start();
         if (scrim != null) move(scrim, fade ? 480 : 0).alpha(0f).start();
         move(wallLayer, fade ? 1200 : 0).scaleX(1.06f).scaleY(1.06f).start();
+        showHints(fade ? 250 : 0);
+        clockSize(true, true);
+        showCredit();
+    }
+
+    /** The photographer of the picture on screen, as Unsplash asks, in the wallpaper view. */
+    private void showCredit() {
+        if (creditView == null) return;
+        String who = Fetch.credit(wallFile);
+        creditView.setText(who == null ? "" : "Photo: " + who + " · Unsplash");
+        move(creditView, cfg.anim(Config.ANIM_FADES) ? 400 : 0).alpha(immersive && who != null ? 1f : 0f).start();
+    }
+
+    /** The arrows come back with each step and leave again after 10 s without a key. */
+    private final Runnable hideHints = () -> {
+        if (immersive) move(hints, cfg.anim(Config.ANIM_FADES) ? 700 : 0).alpha(0f).start();
+    };
+
+    private void showHints(long delay) {
         hints.setVisibility(View.VISIBLE);
-        move(hints, fade ? 400 : 0).alpha(1f).setStartDelay(fade ? 250 : 0).start();
+        if (hints.getAlpha() < 1f) {
+            move(hints, cfg.anim(Config.ANIM_FADES) ? 400 : 0).alpha(1f).setStartDelay(delay).start();
+        }
+        ui.removeCallbacks(hideHints);
+        ui.postDelayed(hideHints, 10_000);
     }
 
     private void exitImmersive(boolean animate) {
         if (!immersive) return;
         immersive = false;
+        ui.removeCallbacks(hideHints);
         long d = animate && cfg.anim(Config.ANIM_FADES) ? 420 : 0;
         move(page, d).translationY(0f).alpha(1f).start();
         if (scrim != null) move(scrim, d).alpha(1f).start();
         move(wallLayer, d).scaleX(1f).scaleY(1f).start();
         move(hints, d / 2).alpha(0f).withEndAction(() -> hints.setVisibility(View.GONE)).start();
+        if (creditView != null) move(creditView, d / 2).alpha(0f).start();
         if (beforeImmersive != null && beforeImmersive.isAttachedToWindow()) beforeImmersive.requestFocus();
         beforeImmersive = null;
     }
@@ -389,6 +432,7 @@ public final class Home extends Activity {
 
     /** One picture on in the wallpaper view; only with Background › Image file. */
     private void zap(int by) {
+        showHints(0);
         if (!"image".equals(cfg.get(Config.BACKGROUND))) return;
         zapDir = by;
         cfg.stepWallpaper(by);
@@ -398,10 +442,7 @@ public final class Home extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (control != null && control.isOpen()) {
-            control.close(true);
-            return;
-        }
+        if (control != null && control.back()) return;
         focusFirst();
     }
 
@@ -480,7 +521,19 @@ public final class Home extends Activity {
         }
         if (at == null) return 0;
         int range = Math.max(0, content.getHeight() - page.getHeight());
-        return Math.max(0, Math.min(range, stopFor(at, rows, page.getHeight())));
+        return Math.max(0, Math.min(range, stop(at, rows, page.getHeight())));
+    }
+
+    /**
+     * Where the page stops for block {@code at}. A block that shows whole from the top stays
+     * put (the dock under the picture); in the Apple TV layout the others stop below the clock
+     * and the Control Center capsule.
+     */
+    private int stop(int[] at, List<int[]> rows, int height) {
+        if (height >= at[1]) return 0;
+        int inset = builtTv ? dp(112) : 0;
+        int stop = stopFor(at, rows, height - inset);
+        return stop == 0 ? 0 : Math.max(0, stop - inset);
     }
 
     /**
@@ -531,7 +584,7 @@ public final class Home extends Activity {
         if (natural > height) {
             int last = 0;
             List<int[]> rows = rowBlocks(content);
-            for (int[] b : rows) last = Math.max(last, stopFor(b, rows, height));
+            for (int[] b : rows) last = Math.max(last, stop(b, rows, height));
             want = base + Math.max(0, last + height - natural);
         }
         if (content.getPaddingBottom() != want) {
@@ -553,6 +606,9 @@ public final class Home extends Activity {
         builtTv = "tv".equals(cfg.get(Config.LAYOUT));
         backdrop = null;
         control = null;
+        veil = null;
+        capsuleView = null;
+        creditView = null;
         builtLocked = locked();
         root = new FrameLayout(this);
         immersive = false;
@@ -630,7 +686,7 @@ public final class Home extends Activity {
 
         LinearLayout when = new LinearLayout(this);
         when.setOrientation(LinearLayout.VERTICAL);
-        clock = Ui.text(this, builtTv ? 44 : 52, Ui.TEXT, Ui.CLOCK);
+        clock = Ui.text(this, builtTv ? 58 : 52, Ui.TEXT, builtTv ? Ui.rounded(this) : Ui.CLOCK);
         date = Ui.text(this, 15, Ui.MUTED, Ui.LABEL);
         if (Ui.theme.caps) date.setAllCaps(true);
         date.setPadding(dp(2), dp(8), 0, 0);
@@ -645,23 +701,46 @@ public final class Home extends Activity {
         if (builtTv) {
             // A small clock in the top right corner, above the page; no date, no buttons.
             date.setVisibility(View.GONE);
-            // Glass type: bright at the top, see-through towards the bottom, on a soft shadow.
             // Always shown, over the page and over the wallpaper view; ☰ opens Control Center.
-            clock.setShadowLayer(dp(10), 0, dp(2), 0x59000000);
-            clock.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
-                if (b - t == ob - ot) return;
-                clock.getPaint().setShader(new android.graphics.LinearGradient(0, 0, 0, b - t,
-                        0xFAFFFFFF, 0x9EFFFFFF, android.graphics.Shader.TileMode.CLAMP));
-                clock.invalidate();
-            });
+            Ui.glassType(clock);
+            Ui.glassStrength(clock, SMALL_GLASS);
             when.setGravity(Gravity.END);
+            // Top right: the Control Center's capsule, then the clock.
+            LinearLayout cornerRow = new LinearLayout(this);
+            cornerRow.setGravity(Gravity.CENTER_VERTICAL);
+            // The clock grows past the row when large; nothing may cut it or the capsule off,
+            // and it is the parent that decides whether a child may draw past its own bounds.
+            root.setClipChildren(false);
+            cornerRow.setClipChildren(false);
+            cornerRow.setClipToPadding(false);
+            when.setClipChildren(false);
+            when.setClipToPadding(false);
             FrameLayout.LayoutParams corner = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.END);
-            corner.topMargin = dp(32);
+            corner.topMargin = dp(28);
             corner.rightMargin = dp(56);
-            root.addView(when, corner);
+            if (!locked()) {
+                control = new Control(this, cfg, root, cornerRow, this::openSettings, this::openOptions,
+                        this::veilOn, this::veilOff);
+                LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(WRAP, WRAP);
+                gap.rightMargin = dp(18);
+                capsuleView = control.capsule();
+                cornerRow.addView(capsuleView, gap);
+            }
+            cornerRow.addView(when);
+            root.addView(cornerRow, corner);
+            this.corner = cornerRow;
+            clockBig = false;
+            when.post(() -> clockSize(true, false));
+            scroll.setOnScrollChangeListener((v, x, y, ox, oy) -> clockSize(y < dp(40) || immersive, true));
+            creditView = Ui.text(this, 13, 0xCCFFFFFF, Ui.MEDIUM);
+            creditView.setShadowLayer(dp(6), 0, dp(1), 0x99000000);
+            creditView.setAlpha(0f);
+            FrameLayout.LayoutParams credit = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.START);
+            credit.leftMargin = dp(56);
+            credit.bottomMargin = dp(36);
+            root.addView(creditView, credit);
             hints = buildHints();
             root.addView(hints, new FrameLayout.LayoutParams(MATCH, MATCH));
-            if (!locked()) control = new Control(this, cfg, root, when, this::openSettings, this::openOptions);
         } else {
             LinearLayout head = new LinearLayout(this);
             head.setClipChildren(false);
@@ -726,6 +805,61 @@ public final class Home extends Activity {
      * (Background › Image file), with a light shade at the top for the clock and a darker one
      * towards the bottom for the grid.
      */
+    /**
+     * The clock is large and see-through over the picture (only the dock below it) and its
+     * regular size once the grid scrolls in; the capsule moves along so they stay side by side.
+     */
+    /** How solid the small clock's glass type is; the large one lets twice as much through. */
+    private static final float SMALL_GLASS = 0.78f;
+
+    private void clockSize(boolean big, boolean animate) {
+        if (big == clockBig || clock == null) return;
+        clockBig = big;
+        View when = (View) clock.getParent();
+        float s = big ? 1.6f : 1f;
+        when.setPivotX(when.getWidth());
+        when.setPivotY(0);
+        float dx = big ? -when.getWidth() * 0.6f : 0f, dy = big ? when.getHeight() * 0.3f : 0f;
+        long d = animate && cfg.anim(Config.ANIM_FADES) ? 380 : 0;
+        move(when, d).scaleX(s).scaleY(s).start();
+        // More see-through when large, in the paint (see Ui.glassType), gliding with the scale.
+        float from = Ui.glassOf(clock), to = big ? 0.42f : SMALL_GLASS;
+        ValueAnimator fade = ValueAnimator.ofFloat(from, to);
+        fade.setDuration(d);
+        fade.addUpdateListener(a -> Ui.glassStrength(clock, (Float) a.getAnimatedValue()));
+        fade.start();
+        if (capsuleView != null) move(capsuleView, d).translationX(dx).translationY(dy).start();
+    }
+
+    /** Over a menu: the screen as it is, shrunk, blurred and dimmed, fading in under the menu. */
+    private void veilOn() {
+        if (veil != null || root.getWidth() == 0) return;
+        int w = Math.max(1, root.getWidth() / 8), h = Math.max(1, root.getHeight() / 8);
+        Bitmap shot = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas c = new android.graphics.Canvas(shot);
+        c.scale(w / (float) root.getWidth(), h / (float) root.getHeight());
+        root.draw(c);
+        int[] px = new int[w * h];
+        shot.getPixels(px, 0, w, 0, 0, w, h);
+        Backdrop.blur(px, w, h, 3, 3);
+        shot.setPixels(px, 0, w, 0, 0, w, h);
+        veil = new ImageView(this);
+        veil.setScaleType(ImageView.ScaleType.FIT_XY);
+        veil.setImageBitmap(shot);
+        // Mostly dark: the screen behind a menu only hints at what is there.
+        veil.setColorFilter(0xB8000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
+        root.addView(veil, new FrameLayout.LayoutParams(MATCH, MATCH));
+        veil.setAlpha(0f);
+        move(veil, cfg.anim(Config.ANIM_FADES) ? 260 : 0).alpha(1f).start();
+    }
+
+    private void veilOff() {
+        ImageView v = veil;
+        veil = null;
+        if (v == null) return;
+        move(v, cfg.anim(Config.ANIM_FADES) ? 220 : 0).alpha(0f).withEndAction(() -> root.removeView(v)).start();
+    }
+
     /** Two glass arrows at the sides of the wallpaper view: left and right change the picture. */
     private View buildHints() {
         FrameLayout h = new FrameLayout(this);
@@ -821,6 +955,7 @@ public final class Home extends Activity {
     }
 
     private void openOptions() {
+        away = true;
         startActivity(new Intent(this, Options.class));
         fade(this, cfg);
     }
@@ -837,6 +972,15 @@ public final class Home extends Activity {
      */
     private void rebuild() {
         Ui.use(cfg.theme());
+        if ("tv".equals(cfg.get(Config.LAYOUT)) != builtTv) {
+            // The Apple TV layout draws some icons itself: load all art again for the new layout.
+            for (Item it : apps.all) {
+                it.banner = null;
+                it.icon = null;
+                it.artRequested = false;
+            }
+            if (extras != null) for (Item it : extras) it.artRequested = false;
+        }
         List<Item> appItems = apps.all, inputItems = inputs.all;
         chips.clear();
         setContentView(build());
@@ -916,9 +1060,12 @@ public final class Home extends Activity {
         List<Item> all = row == favs ? apps.all : row.all;
         List<Item> shown = enabled ? Catalog.visible(cfg, row.kind, all, recentFor(row.kind))
                 : new ArrayList<>();
-        if (builtTv && row == apps && !locked()) {
+        if (builtTv && (row == apps || row == favs) && !locked()) {
+            // Options ends the dock; Settings ends the grid.
             if (extras == null) extras = Catalog.extras(this, settingsIntent());
-            shown.addAll(extras);
+            for (Item it : extras) {
+                if (Catalog.OPTIONS.equals(it.id) == (row == favs)) shown.add(it);
+            }
         }
         int[] size = cardSize();
         int w = size[0], h = Catalog.isApp(row.kind) ? size[1] : Math.round(size[1] * 0.56f);
@@ -972,7 +1119,7 @@ public final class Home extends Activity {
     private void loadArt(Item it) {
         it.artRequested = true;
         io.execute(() -> {
-            Catalog.art(getPackageManager(), it);
+            Catalog.art(getPackageManager(), it, builtTv);
             ui.post(() -> {
                 for (Row row : new Row[] {favs, apps}) {
                     ViewGroup tiles = row.tiles();
@@ -1049,6 +1196,11 @@ public final class Home extends Activity {
     }
 
     private void focusFirst() {
+        // tvOS: HOME and Back bring the dock and the picture above it back into view.
+        if (page instanceof ScrollView) {
+            if (cfg.anim(Config.ANIM_FADES)) ((ScrollView) page).smoothScrollTo(0, 0);
+            else page.scrollTo(0, 0);
+        }
         favs.scroll.scrollTo(0, 0);
         apps.scroll.scrollTo(0, 0);
         inputs.scroll.scrollTo(0, 0);
@@ -1089,6 +1241,7 @@ public final class Home extends Activity {
         }
         boolean image = "image".equals(mode) || "adaptive-tint".equals(mode);
         File file = image ? cfg.wallpaper() : null;
+        wallFile = file;
         tintWallpaper = "adaptive-tint".equals(mode) && file != null;
         if ("adaptive".equals(mode)) {
             if (!mode.equals(backgroundMode)) {
@@ -1133,6 +1286,7 @@ public final class Home extends Activity {
             ui.post(() -> {
                 if (!key.equals(wallKey)) return;
                 showWall(b);
+                if (immersive) showCredit();
             });
         });
     }
@@ -1207,6 +1361,11 @@ public final class Home extends Activity {
             openSettings();
             return;
         }
+        if (builtTv && Catalog.SCREENSAVER.equals(t.item.id)) {
+            away = true;
+            Showcase.start(this);
+            return;
+        }
         if (Catalog.isApp(t.kind)) {
             launch(new Intent(t.item.intent), t.item.id);
             return;
@@ -1221,6 +1380,7 @@ public final class Home extends Activity {
     }
 
     private void launch(Intent i, String pkg) {
+        away = true;
         if (Guard.AMAZON.equals(pkg)) Guard.pause();
         try {
             startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
@@ -1239,7 +1399,9 @@ public final class Home extends Activity {
         String[] actions = app
                 ? new String[] {"Move", "Rename", "Hide", favAction, "App info"}
                 : new String[] {"Move", "Rename", "Hide"};
+        veilOn();
         new AlertDialog.Builder(this, Ui.DIALOG)
+                .setOnDismissListener(di -> veilOff())
                 .setTitle(Catalog.label(cfg, t.item))
                 .setItems(actions, (d, which) -> {
                     switch (which) {
@@ -1284,7 +1446,9 @@ public final class Home extends Activity {
         box.setPadding(dp(24), dp(8), dp(24), 0);
         box.addView(field);
         String key = "name." + t.item.id;
+        veilOn();
         AlertDialog d = new AlertDialog.Builder(this, Ui.DIALOG)
+                .setOnDismissListener(di -> veilOff())
                 .setTitle("Rename")
                 .setView(box)
                 .setPositiveButton("Save", (dialog, w) -> {

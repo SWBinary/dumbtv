@@ -72,6 +72,68 @@ final class Ui {
         return g;
     }
 
+    private static Typeface rounded;
+
+    /**
+     * The Apple TV clock face: a rounded bold font when one ships in assets/fonts/clock.ttf,
+     * else Android's medium sans in bold.
+     */
+    static Typeface rounded(Context c) {
+        if (rounded == null) {
+            try {
+                rounded = Typeface.createFromAsset(c.getAssets(), "fonts/clock.ttf");
+            } catch (RuntimeException e) {
+                rounded = Typeface.create("sans-serif-medium", Typeface.BOLD);
+            }
+        }
+        return rounded;
+    }
+
+    /**
+     * Glass type: bright at the top, see-through towards the bottom, on a soft shadow. The
+     * see-through is in the paint itself, never a view alpha: an alpha on the view would draw it
+     * through a layer cut to its bounds, clipping the round digits and boxing in the shadow.
+     */
+    static void glassType(TextView v) {
+        float d = v.getResources().getDisplayMetrics().density;
+        v.setPadding(v.getPaddingLeft(), Math.round(8 * d), v.getPaddingRight(), Math.round(8 * d));
+        glassStrength(v, 1f);
+        v.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) -> {
+            if (b - t != ob - ot) glassStrength(v, glassOf(v));
+        });
+    }
+
+    /** How solid the glass type is: 1 as drawn, lower for more of the picture through it. */
+    private static final java.util.Map<TextView, Float> GLASS = new java.util.WeakHashMap<>();
+
+    static float glassOf(TextView v) {
+        Float s = GLASS.get(v);
+        return s == null ? 1f : s;
+    }
+
+    static void glassStrength(TextView v, float s) {
+        GLASS.put(v, s);
+        float d = v.getResources().getDisplayMetrics().density;
+        v.setShadowLayer(10 * d, 0, 2 * d, Math.round(0x59 * s) << 24);
+        int h = Math.max(1, v.getHeight());
+        v.getPaint().setShader(new android.graphics.LinearGradient(0, 0, 0, h,
+                Math.round(0xFA * s) << 24 | 0xFFFFFF, Math.round(0xA6 * s) << 24 | 0xFFFFFF,
+                android.graphics.Shader.TileMode.CLAMP));
+        v.invalidate();
+    }
+
+    /**
+     * Frosted glass for panels that lie over the page (Control Center, its menus): dense and
+     * dark, since without a real blur a see-through panel shows the icons beneath it.
+     */
+    static GradientDrawable frosted(float radius) {
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0xF0373A40, 0xF01E2024});
+        g.setCornerRadius(radius);
+        g.setStroke(2, 0x40FFFFFF);
+        return g;
+    }
+
     static GradientDrawable round(int color, float radius) {
         GradientDrawable d = new GradientDrawable();
         d.setColor(color);
