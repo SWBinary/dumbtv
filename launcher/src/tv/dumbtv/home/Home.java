@@ -68,7 +68,7 @@ public final class Home extends Activity {
     private View tint;
     private TextView clock, date;
     private Meter meter;
-    private Row apps, inputs;
+    private Row favs, apps, inputs;
     private Map<String, Long> recent = new HashMap<>();
     private Tile moving;
     private String wallKey;
@@ -212,8 +212,15 @@ public final class Home extends Activity {
             return;
         }
         int fit = getResources().getDisplayMetrics().widthPixels / (cardSize()[0] + dp(18)) + 1;
+        // The favorites row and the apps row each show about one screen width of tiles.
+        List<Item> onScreen = new ArrayList<>();
+        List<Item> favItems = Catalog.visible(cfg, Catalog.FAVS, apps.all);
+        onScreen.addAll(favItems.subList(0, Math.min(fit, favItems.size())));
         for (Item it : Catalog.visible(cfg, Catalog.APPS, apps.all, recentFor(Catalog.APPS))) {
             if (fit-- <= 0) break;
+            onScreen.add(it);
+        }
+        for (Item it : onScreen) {
             Catalog.art(getPackageManager(), it);
             it.artRequested = true;
         }
@@ -359,7 +366,7 @@ public final class Home extends Activity {
      */
     private List<int[]> rowBlocks(View content) {
         List<int[]> rows = new ArrayList<>();
-        for (Row row : new Row[] {apps, inputs}) {
+        for (Row row : new Row[] {favs, apps, inputs}) {
             if (row.scroll.getVisibility() == View.VISIBLE) {
                 rows.add(new int[] {topIn(row.title, content), topIn(row.scroll, content) + row.scroll.getHeight()});
             } else if (row.grid.getVisibility() == View.VISIBLE) {
@@ -468,7 +475,7 @@ public final class Home extends Activity {
             @Override
             public View focusSearch(View focused, int direction) {
                 if (direction == View.FOCUS_DOWN && chips.contains(focused)) {
-                    View below = nearest(apps.tiles(), focused);
+                    View below = nearest(favs.tiles().getChildCount() > 0 ? favs.tiles() : apps.tiles(), focused);
                     if (below != null) return below;
                 }
                 return super.focusSearch(focused, direction);
@@ -503,6 +510,7 @@ public final class Home extends Activity {
         head.addView(chip("Settings", v -> openSettings()));
         column.addView(head, new LinearLayout.LayoutParams(MATCH, WRAP));
 
+        favs = new Row(Catalog.FAVS, "Favorites", column);
         apps = new Row(Catalog.APPS, "Apps", column);
         inputs = new Row(Catalog.INPUTS, "Inputs", column);
         return root;
@@ -576,6 +584,7 @@ public final class Home extends Activity {
         meter.setVisibility("on".equals(cfg.get(Config.MEMORY)) ? View.VISIBLE : View.GONE);
         meter.setAccent(accent);
         meter.setEase(cfg.anim(Config.ANIM_FADES));
+        render(favs);
         render(apps);
         render(inputs);
         background();
@@ -630,6 +639,7 @@ public final class Home extends Activity {
                     }
                 }
                 apps.all = list;
+                render(favs);
                 render(apps);
             });
         });
@@ -670,10 +680,12 @@ public final class Home extends Activity {
         row.grid.removeAllViews();
 
         boolean enabled = !Catalog.INPUTS.equals(row.kind) || "on".equals(cfg.get(Config.INPUTS));
-        List<Item> shown = enabled ? Catalog.visible(cfg, row.kind, row.all, recentFor(row.kind))
+        // Favorites are drawn from the apps list.
+        List<Item> all = row == favs ? apps.all : row.all;
+        List<Item> shown = enabled ? Catalog.visible(cfg, row.kind, all, recentFor(row.kind))
                 : new ArrayList<>();
         int[] size = cardSize();
-        int w = size[0], h = Catalog.APPS.equals(row.kind) ? size[1] : Math.round(size[1] * 0.56f);
+        int w = size[0], h = Catalog.isApp(row.kind) ? size[1] : Math.round(size[1] * 0.56f);
         String labels = cfg.get(Config.LABELS);
         int accent = cfg.accent();
         boolean zoom = cfg.anim(Config.ANIM_FOCUS);
@@ -697,7 +709,7 @@ public final class Home extends Activity {
             }
             if (it.id.equals(keep)) restore = index;
             index++;
-            if (Catalog.APPS.equals(row.kind) && !it.artRequested) loadArt(it);
+            if (Catalog.isApp(row.kind) && !it.artRequested) loadArt(it);
         }
         row.setVisible(!shown.isEmpty());
         if (restore >= 0) {
@@ -714,8 +726,10 @@ public final class Home extends Activity {
         io.execute(() -> {
             Catalog.art(getPackageManager(), it);
             ui.post(() -> {
-                ViewGroup tiles = apps.tiles();
-                for (int i = 0; i < tiles.getChildCount(); i++) tiles.getChildAt(i).invalidate();
+                for (Row row : new Row[] {favs, apps}) {
+                    ViewGroup tiles = row.tiles();
+                    for (int i = 0; i < tiles.getChildCount(); i++) tiles.getChildAt(i).invalidate();
+                }
                 if (focusedItem() == it) focusBackground(it);
             });
         });
@@ -782,11 +796,13 @@ public final class Home extends Activity {
     }
 
     private void focusFirst() {
+        favs.scroll.scrollTo(0, 0);
         apps.scroll.scrollTo(0, 0);
         inputs.scroll.scrollTo(0, 0);
-        View first = apps.tiles().getChildAt(0);
+        View first = favs.tiles().getChildAt(0);
+        if (first == null) first = apps.tiles().getChildAt(0);
         if (first == null) first = inputs.tiles().getChildAt(0);
-        landed = apps.tiles().getChildCount() > 0;
+        landed = favs.tiles().getChildCount() > 0 || apps.tiles().getChildCount() > 0;
         if (first == null) first = chips.get(0);
         first.requestFocus();
     }
@@ -886,7 +902,7 @@ public final class Home extends Activity {
     }
 
     private void open(Tile t) {
-        if (Catalog.APPS.equals(t.kind)) {
+        if (Catalog.isApp(t.kind)) {
             launch(new Intent(t.item.intent), t.item.id);
             return;
         }
@@ -910,9 +926,12 @@ public final class Home extends Activity {
     }
 
     private void menu(Tile t) {
-        boolean app = Catalog.APPS.equals(t.kind);
+        boolean app = Catalog.isApp(t.kind);
+        String kind = app ? Catalog.APPS : Catalog.INPUTS;
+        boolean fav = app && Catalog.favorite(cfg, t.item);
+        String favAction = fav ? "Remove from favorites" : "Add to favorites";
         String[] actions = app
-                ? new String[] {"Move", "Rename", "Hide", "App info"}
+                ? new String[] {"Move", "Rename", "Hide", favAction, "App info"}
                 : new String[] {"Move", "Rename", "Hide"};
         new AlertDialog.Builder(this, Ui.DIALOG)
                 .setTitle(Catalog.label(cfg, t.item))
@@ -932,9 +951,15 @@ public final class Home extends Activity {
                             rename(t);
                             break;
                         case 2:
-                            Catalog.setShown(cfg, t.kind, t.item, false);
+                            Catalog.setShown(cfg, kind, t.item, false);
+                            if (app) render(favs);
                             render(app ? apps : inputs);
                             Toast.makeText(this, "Hidden. Bring it back from Options.", Toast.LENGTH_SHORT).show();
+                            break;
+                        case 3:
+                            Catalog.setFavorite(cfg, t.item, !fav);
+                            render(favs);
+                            render(apps);
                             break;
                         default:
                             launch(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,

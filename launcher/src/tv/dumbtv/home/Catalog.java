@@ -20,8 +20,30 @@ import java.util.Map;
 /** Where tiles come from, and which of them the user wants on the home screen. */
 final class Catalog {
     static final String APPS = "apps", INPUTS = "inputs";
+    /**
+     * Favorites: apps picked from the tile menu, in a row of their own above Apps and no longer
+     * in Apps. {@code favs.order} in home.conf is both the list and its order.
+     */
+    static final String FAVS = "favs";
+    private static final String FAV_LIST = FAVS + ".order";
 
     private Catalog() {}
+
+    /** Favorites are apps too: same tiles, same menu. */
+    static boolean isApp(String kind) {
+        return !INPUTS.equals(kind);
+    }
+
+    static boolean favorite(Config cfg, Item it) {
+        return cfg.list(FAV_LIST).contains(it.id);
+    }
+
+    static void setFavorite(Config cfg, Item it, boolean on) {
+        List<String> favs = cfg.list(FAV_LIST);
+        favs.remove(it.id);
+        if (on) favs.add(it.id);
+        cfg.setList(FAV_LIST, favs);
+    }
 
     /** Every launchable app, TV apps first; drawables are left for {@link #art}. */
     static List<Item> apps(Context c) {
@@ -113,9 +135,14 @@ final class Catalog {
     /** As above, then newest first by {@code recent} (package to last-used time) when it is set. */
     static List<Item> visible(Config cfg, String kind, List<Item> all, Map<String, Long> recent) {
         List<String> order = cfg.list(kind + ".order");
+        List<String> favs = cfg.list(FAV_LIST);
         List<Item> out = new ArrayList<>();
         for (Item it : all) {
-            if (shown(cfg, kind, it)) out.add(it);
+            if (FAVS.equals(kind)) {
+                if (favs.contains(it.id) && shown(cfg, APPS, it)) out.add(it);
+            } else if (shown(cfg, kind, it) && !(APPS.equals(kind) && favs.contains(it.id))) {
+                out.add(it);
+            }
         }
         Collections.sort(out, (a, b) -> Integer.compare(rank(order, a.id), rank(order, b.id)));
         // The sort is stable, so apps with no record keep the user's order after the rest.
