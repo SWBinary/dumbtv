@@ -56,7 +56,7 @@ public final class Options extends Activity {
         if (glass) {
             // One card of glass in the middle of the screen; the page scrolls inside the margins.
             list.setPadding(dp(28), dp(28), dp(28), dp(28));
-            list.setBackground(Ui.glass(dp(32)));
+            list.setBackground(Ui.menu(dp(32)));
             FrameLayout.LayoutParams card = new FrameLayout.LayoutParams(dp(680), WRAP, Gravity.CENTER_HORIZONTAL);
             card.topMargin = dp(48);
             card.bottomMargin = dp(48);
@@ -121,7 +121,7 @@ public final class Options extends Activity {
         back.setImageBitmap(soft != null ? soft : Backdrop.aurora(Ui.theme.aurora));
         frame.addView(back, new FrameLayout.LayoutParams(MATCH, MATCH));
         View shade = new View(this);
-        shade.setBackgroundColor(0xB8000000);
+        shade.setBackgroundColor(0x33000000);
         frame.addView(shade, new FrameLayout.LayoutParams(MATCH, MATCH));
         frame.addView(page, new FrameLayout.LayoutParams(MATCH, MATCH));
         return frame;
@@ -198,8 +198,9 @@ public final class Options extends Activity {
         }
         if (c == Config.THEME) {
             // A new theme brings its own accent and background; both can be changed afterwards.
+            // Your own pictures (Background › Image file) stay: they are not part of a theme.
             cfg.set(Config.ACCENT.key, null);
-            cfg.set(Config.BACKGROUND.key, null);
+            if (!"image".equals(cfg.get(Config.BACKGROUND))) cfg.set(Config.BACKGROUND.key, null);
             recreate();
             return true;
         }

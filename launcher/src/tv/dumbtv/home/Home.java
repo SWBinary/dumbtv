@@ -831,23 +831,25 @@ public final class Home extends Activity {
         if (capsuleView != null) move(capsuleView, d).translationX(dx).translationY(dy).start();
     }
 
-    /** Over a menu: the screen as it is, shrunk, blurred and dimmed, fading in under the menu. */
+    /**
+     * Over a menu: the screen as it is, softened a little and dimmed a fifth, fading in under
+     * the menu. The apps and the picture stay easy to make out behind it.
+     */
     private void veilOn() {
         if (veil != null || root.getWidth() == 0) return;
-        int w = Math.max(1, root.getWidth() / 8), h = Math.max(1, root.getHeight() / 8);
+        int w = Math.max(1, root.getWidth() / 4), h = Math.max(1, root.getHeight() / 4);
         Bitmap shot = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         android.graphics.Canvas c = new android.graphics.Canvas(shot);
         c.scale(w / (float) root.getWidth(), h / (float) root.getHeight());
         root.draw(c);
         int[] px = new int[w * h];
         shot.getPixels(px, 0, w, 0, 0, w, h);
-        Backdrop.blur(px, w, h, 3, 3);
+        Backdrop.blur(px, w, h, 1, 2);
         shot.setPixels(px, 0, w, 0, 0, w, h);
         veil = new ImageView(this);
         veil.setScaleType(ImageView.ScaleType.FIT_XY);
         veil.setImageBitmap(shot);
-        // Mostly dark: the screen behind a menu only hints at what is there.
-        veil.setColorFilter(0xB8000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
+        veil.setColorFilter(0x33000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
         root.addView(veil, new FrameLayout.LayoutParams(MATCH, MATCH));
         veil.setAlpha(0f);
         move(veil, cfg.anim(Config.ANIM_FADES) ? 260 : 0).alpha(1f).start();

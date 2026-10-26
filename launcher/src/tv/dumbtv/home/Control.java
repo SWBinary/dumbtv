@@ -201,8 +201,8 @@ final class Control {
         Panel p = new Panel(a);
         p.setOrientation(LinearLayout.VERTICAL);
         p.setPadding(dp(10), dp(10), dp(10), dp(10));
-        // Glass over the blurred screen behind it (the veil), so only the blur shows through.
-        p.setBackground(Ui.glass(dp(24)));
+        // Glass over the blurred screen behind it (the veil): 15-20% of it shows through.
+        p.setBackground(Ui.menu(dp(24)));
 
         TextView sleep = button("Sleep", Glyph.POWER, true, v -> {
             close(false);
@@ -259,7 +259,7 @@ final class Control {
         menu = new Panel(a);
         menu.setOrientation(LinearLayout.VERTICAL);
         menu.setPadding(dp(8), dp(8), dp(8), dp(8));
-        menu.setBackground(Ui.frosted(dp(20)));
+        menu.setBackground(Ui.menu(dp(20)));
         TextView title = Ui.text(a, 12, Ui.MUTED, Ui.MEDIUM);
         title.setText(left > 0 ? "SLEEP TIMER · " + left + " MIN LEFT" : "SLEEP TIMER");
         title.setLetterSpacing(0.1f);

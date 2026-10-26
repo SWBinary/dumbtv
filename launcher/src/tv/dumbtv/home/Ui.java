@@ -123,12 +123,13 @@ final class Ui {
     }
 
     /**
-     * Frosted glass for panels that lie over the page (Control Center, its menus): dense and
-     * dark, since without a real blur a see-through panel shows the icons beneath it.
+     * Menu glass: 85% solid at the top, 80% at the bottom, with a light hairline edge, so the
+     * buttons read over a home screen that stays clearly visible behind it. For the Control
+     * Center, its timer menu and the Options card.
      */
-    static GradientDrawable frosted(float radius) {
+    static GradientDrawable menu(float radius) {
         GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0xF0373A40, 0xF01E2024});
+                new int[] {0xD93A3D43, 0xCC26282D});
         g.setCornerRadius(radius);
         g.setStroke(2, 0x40FFFFFF);
         return g;
